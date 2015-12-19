@@ -12,3 +12,14 @@ Another application could be high-density debugging information on a computer - 
 
 This can be implemented by a priority queue combined with a doubly-linked list (or perhaps severeral linked lists), once the allocated memory for the structure has been taken, the lowest priority element is removed and its memory is used for the next element to be enqueued.
 
+An enqueue operation when not full would have time complexity of `O(1)` for the list append and `O(log n)` for the priority queue insertion. 
+An enqueue operation when full would have additional complexity of `O(log n)` for the removal of the minimum priority element.
+A dequeue operation would have time complexity of `O(1)` for the list removal and `O(log n)` for the priority queue removal. 
+
+Additionally, multiple series of data can share the same memory in the structure as long as their priorities are comparable.
+
+## References
+
+[Compression of Time Series by Extracting Major Extrema - Fink, Gandhi](http://www.cs.cmu.edu/~eugene/research/full/compress-series.pdf)
+[Rust collections::linked_list](https://doc.rust-lang.org/src/collections/linked_list.rs.html)
+
