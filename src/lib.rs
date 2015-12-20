@@ -76,8 +76,18 @@ impl<T> FixedSizePriorityBuffer<T> {
         }
     }
 
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
     pub fn enqueue(&mut self, element: T) {
-        let mut new_node = Box::new(Node::new(element));
+        let new_node = Box::new(Node::new(element));
         match unsafe { self.last.resolve_mut() } {
             None => {
                 self.first = Some(new_node);
@@ -109,17 +119,17 @@ mod tests {
 
     #[test]
     fn queue_is_fifo() {
-        let mut b = FixedSizePriorityBuffer::<i32>::new(10);
-        assert_eq!(b.capacity, 10);
-        assert_eq!(b.size, 0);
+        let mut b = FixedSizePriorityBuffer::<i32>::new(3);
+        assert_eq!(b.capacity(), 3);
+        assert_eq!(b.size(), 0);
         b.enqueue(1);
         b.enqueue(2);
         b.enqueue(3);
-        assert_eq!(b.size, 3);
+        assert_eq!(b.size(), 3);
         assert_eq!(b.dequeue(), Some(1));
         assert_eq!(b.dequeue(), Some(2));
         assert_eq!(b.dequeue(), Some(3));
-        assert_eq!(b.size, 0);
+        assert_eq!(b.size(), 0);
     }
 }
 
