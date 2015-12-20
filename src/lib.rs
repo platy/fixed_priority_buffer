@@ -7,6 +7,9 @@ pub struct FixedSizePriorityBuffer<T> {
     // Series data
     first: Link<T>,
     last: Rawlink<Node<T>>,
+    // Preallocated nodes
+    first_empty: Link<T>,
+    last_empty: Rawlink<Node<T>>,
 }
 
 type Link<T> = Option<Box<Node<T>>>;
@@ -18,7 +21,7 @@ struct Rawlink<T> {
 struct Node<T> {
     next: Link<T>,
     prev: Rawlink<Node<T>>,
-    value: T,
+    value: Option<T>,
 }
 
 impl<T> Rawlink<T> {
@@ -41,7 +44,11 @@ impl<T> Rawlink<T> {
 
 impl<T> Node<T> {
     fn new(v: T) -> Node<T> {
-        Node{value: v, next: None, prev: Rawlink::none()}
+        Node{value: Some(v), next: None, prev: Rawlink::none()}
+    }
+
+    fn empty() -> Node<T> {
+        Node{value: None, next: None, prev: Rawlink::none()}
     }
 
     fn set_next(&mut self, mut next: Box<Node<T>>) {
@@ -66,13 +73,21 @@ fn link_no_prev<T>(mut next: Box<Node<T>>) -> Link<T> {
 }
 
 impl<T> FixedSizePriorityBuffer<T> {
-    #[inline]
     pub fn new(capacity: usize) -> FixedSizePriorityBuffer<T> {
+        let mut first_empty = Box::new(Node::<T>::empty());
+        let last_empty = Rawlink::some(first_empty.as_mut());
+        for i in 1..capacity {
+            let mut next_empty = Box::new(Node::<T>::empty());
+            next_empty.set_next(first_empty);
+            first_empty = next_empty;
+        }
         FixedSizePriorityBuffer{
             capacity: capacity,
             size: 0,
             first: None,
             last: Rawlink::none(),
+            first_empty: link_no_prev(first_empty),
+            last_empty: last_empty,
         }
     }
 
@@ -108,7 +123,7 @@ impl<T> FixedSizePriorityBuffer<T> {
                 Some(node) => self.first = link_no_prev(node),
                 None => self.last = Rawlink::none(),
             }
-            first_node.value
+            first_node.value.expect("Value should always be Some when being dequeued")
         })
     }
 }
@@ -130,6 +145,15 @@ mod tests {
         assert_eq!(b.dequeue(), Some(2));
         assert_eq!(b.dequeue(), Some(3));
         assert_eq!(b.size(), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn queue_is_fixed_capacity() {
+        let mut b = FixedSizePriorityBuffer::<i32>::new(2);
+        b.enqueue(1);
+        b.enqueue(2);
+        b.enqueue(3);
     }
 }
 
