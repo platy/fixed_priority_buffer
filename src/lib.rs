@@ -1,5 +1,5 @@
-extern crate core;
-use core::ptr;
+use std::ptr;
+
 
 pub struct FixedSizePriorityBuffer<T> {
     capacity: usize,
