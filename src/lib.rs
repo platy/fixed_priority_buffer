@@ -33,6 +33,7 @@ pub struct FixedCapacityList<T> {
 }
 
 impl<T> FixedCapacityList<T> {
+    /// Creates a new fixed capacity list with the given capacity
     pub fn new(capacity: usize) -> FixedCapacityList<T> {
         let mut heap = Vec::<NodeOption<T>>::with_capacity(capacity);
         for i in 0..capacity-1 {
@@ -46,10 +47,15 @@ impl<T> FixedCapacityList<T> {
         }
     }
 
+    /// Add an element to the end of the list
+    /// 
+    /// # Panics
+    /// if there is no remaining capacity
     pub fn enqueue(&mut self, element: T) {
         let free_index = self.free.expect("No remaining capacity");
         self.free = self.heap[free_index].expect_free();
         match self.list {
+            // First item in empty list
             Sentry::Empty => {
                 self.heap[free_index] = NodeOption::Occupied {
                     next: None,
@@ -63,7 +69,8 @@ impl<T> FixedCapacityList<T> {
             },
             Sentry::Filled { first, last } => {
                 match self.heap[last] {
-                    NodeOption::Occupied { ref mut next, .. } => *next = Some(free_index),
+                    NodeOption::Occupied { ref mut next, .. } =>
+                        *next = Some(free_index),
                     _ => panic!["Node in list was free"],
                 };
                 self.heap[free_index] = NodeOption::Occupied {
@@ -79,6 +86,7 @@ impl<T> FixedCapacityList<T> {
         }
     }
 
+    /// Remove and return an element from the front of the list
     pub fn dequeue(&mut self) -> Option<T> {
         match self.list {
             Sentry::Empty => None,
@@ -90,25 +98,26 @@ impl<T> FixedCapacityList<T> {
                 // that node is now the next free node
                 self.free = Some(first);
 
-                // we now process the occupied node we removed from the heap
+                // we now process the occupied node and fix the list
                 match temp_node {
-                    NodeOption::Occupied { next, prev: None, value } => {
-                        self.list = match next {
-                            Some(next) => {
-                                match self.heap[next] {
-                                    NodeOption::Occupied { next: _, ref mut prev, .. } => {
-                                        *prev = None;
-                                        Sentry::Filled { first: next, last: last }
-                                    },
-                                    _ => panic!["Free node in list"],
-                                }
-                            }
-                            None => Sentry::Empty,
+                    NodeOption::Occupied { next: Some(next), prev: None, value } => {
+                        self.list = match self.heap[next] {
+                            NodeOption::Occupied { next: _, ref mut prev, .. } => {
+                                *prev = None;
+                                Sentry::Filled { first: next, last: last }            
+                            },
+                            _ => panic!["Free node in list"],
                         };
                         Some(value)
                     },
-                    NodeOption::Occupied { .. } => panic!["removed node not at front of list"],
-                    NodeOption::Free(..) => panic!["Unoccupied node in list"],
+                    NodeOption::Occupied { next: None, prev: None, value } => {
+                        self.list = Sentry::Empty;
+                        Some(value)
+                    },
+                    NodeOption::Occupied { .. } =>
+                        panic!["removed node not at front of list"],
+                    NodeOption::Free(..) => 
+                        panic!["Unoccupied node in list"],
                 }
             }
         }
@@ -143,6 +152,19 @@ mod tests {
         b.enqueue(1);
         b.enqueue(2);
         b.enqueue(3);
+    }
+
+    #[test]
+    fn list_reuses_freed_nodes() {
+        let mut b = FixedCapacityList::<i32>::new(2);
+        b.enqueue(1);
+        b.enqueue(2);
+        b.dequeue();
+        b.dequeue();
+        b.enqueue(3);
+        b.enqueue(4);
+        assert_eq![b.dequeue(), Some(3)];
+        assert_eq![b.dequeue(), Some(4)];
     }
 }
 
