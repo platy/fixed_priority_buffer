@@ -1,229 +1,145 @@
-use std::ptr;
 use std::mem;
 
-pub struct FixedSizePriorityBuffer<T> {
-    capacity: usize,
-    size: usize,
-    // Series data
-    first: Link<T>,
-    last: Rawlink<Node<T>>,
-    // Preallocated nodes
-    first_empty: Link<T>,
-    last_empty: Rawlink<Node<T>>,
-}
-
-type Link<T> = Option<Box<Node<T>>>;
-
-struct Rawlink<T> {
-    p: *mut T,
-}
-
-struct Node<T> {
-    next: Link<T>,
-    prev: Rawlink<Node<T>>,
-    value: Option<T>,
-}
-
-impl<T> Rawlink<T> {
-    fn none() -> Rawlink<T> {
-        Rawlink{p: ptr::null_mut()}
-    }
-
-    fn some(n: &mut T) -> Rawlink<T> {
-        Rawlink{p: n}
-    }
-
-    unsafe fn resolve_mut<'a>(&mut self) -> Option<&'a mut T> {
-        if self.p.is_null() {
-            None
-        } else {
-            Some(&mut *self.p)
-        }
-    }
-
-    fn is_none(&self) -> bool {
-        self.p.is_null()
+enum NodeOption<T> {
+    Free(Option<usize>),
+    Occupied {
+        next: Option<usize>,
+        prev: Option<usize>,
+        value: T
     }
 }
 
-impl<T> Node<T> {
-    fn new(v: T) -> Node<T> {
-        Node{value: Some(v), next: None, prev: Rawlink::none()}
-    }
-
-    fn empty() -> Node<T> {
-        Node{value: None, next: None, prev: Rawlink::none()}
-    }
-
-    fn set_next(&mut self, mut next: Box<Node<T>>) {
-        debug_assert!(self.next.is_none());
-        next.prev = Rawlink::some(self);
-        self.next = Some(next);
-    }
-}
-
-impl<'a, T> From<&'a mut Link<T>> for Rawlink<Node<T>> {
-    fn from(node: &'a mut Link<T>) -> Self {
-        match node.as_mut() {
-            None => Rawlink::none(),
-            Some(ptr) => Rawlink::some(ptr),
+impl<T> NodeOption<T> {
+    fn expect_free(&self) -> Option<usize> {
+        match self {
+            &NodeOption::Free(next) => next,
+            &NodeOption::Occupied {..} => panic!["Expected Node to be free"],
         }
     }
 }
 
-fn link_no_prev<T>(mut next: Box<Node<T>>) -> Link<T> {
-    next.prev = Rawlink::none();
-    Some(next)
-}
-
-
-fn insert_slice<T>(range_start: &mut Link<T>, range_end: &mut Rawlink<Node<T>>,
-                   target_start: &mut Link<T>, target_end: &mut Rawlink<Node<T>>) {
-    if range_start.is_none() {
-        panic!("range_start must not be none");
-    }
-    if range_end.is_none() {
-        panic!("range_end must not be none");
-    }
-    
-
-    unsafe {
-        // dereference the end node first as the pointer will be changed when rotating the backwards links
-        let before_end_node: *mut Node<T> = 
-            range_end.resolve_mut().expect("source list to not be emptyi: end is none");
-        // rotate backawrds links first as we have captured the pointer to the end node
-        {
-            let start_node: &mut Box<Node<T>> = &mut 
-                range_start.as_mut().expect("source list to not be empty: start is none");
-            let mut temp: Rawlink<Node<T>> = mem::uninitialized();
-            ptr::copy_nonoverlapping(&start_node.prev, &mut temp, 1);
-            ptr::copy_nonoverlapping(&*target_end, &mut start_node.prev, 1);
-            ptr::copy_nonoverlapping(&*range_end, target_end, 1);
-            ptr::copy_nonoverlapping(&temp, range_end, 1);
-
-            mem::forget(temp);
-        }
-
-        // rotate forwards links
-        {
-            let mut temp: Link<T> = mem::uninitialized();
-            ptr::copy_nonoverlapping(&*range_start, &mut temp, 1);
-            ptr::copy_nonoverlapping(&(*before_end_node).next, range_start, 1); 
-            ptr::copy_nonoverlapping(&*target_start, &mut (*before_end_node).next, 1);
-            ptr::copy_nonoverlapping(&temp, target_start, 1); 
-
-            mem::forget(temp);
-        }
+enum Sentry {
+    Empty,
+    Filled {
+        first: usize,
+        last: usize
     }
 }
 
-#[cfg(test)]
-mod swap_tests {
-    use super::Node;
-    use super::link_no_prev;
-    use super::Rawlink;
-    use super::insert_slice;
-
-    #[test]
-    fn swaps_single_item_list_with_empty() {
-        let mut single_node = Box::new(Node::new("Single node"));
-        let mut single_end = Rawlink::some(single_node.as_mut());
-        let mut single_start = link_no_prev(single_node);
-        let mut empty_start = None;
-        let mut empty_end = Rawlink::none();
-
-        insert_slice(&mut single_start, &mut single_end, &mut empty_start, &mut empty_end);
-
-        assert!(single_start.is_none());
-        assert!(single_end.is_none());
-        let empty_start = empty_start.expect("the node should have been moved");
-        assert_eq!(empty_start.value.expect("some value on node"), "Single node");
-    }
+pub struct FixedCapacityList<T> {
+    heap: Vec<NodeOption<T>>,
+    list: Sentry,
+    free: Option<usize>,
 }
 
-
-impl<T> FixedSizePriorityBuffer<T> {
-    pub fn new(capacity: usize) -> FixedSizePriorityBuffer<T> {
-        let mut first_empty = Box::new(Node::<T>::empty());
-        let last_empty = Rawlink::some(first_empty.as_mut());
-        for _ in 1..capacity {
-            let mut next_empty = Box::new(Node::<T>::empty());
-            next_empty.set_next(first_empty);
-            first_empty = next_empty;
+impl<T> FixedCapacityList<T> {
+    pub fn new(capacity: usize) -> FixedCapacityList<T> {
+        let mut heap = Vec::<NodeOption<T>>::with_capacity(capacity);
+        for i in 0..capacity-1 {
+            heap.push(NodeOption::Free(Some(i+1)));
         }
-        FixedSizePriorityBuffer{
-            capacity: capacity,
-            size: 0,
-            first: None,
-            last: Rawlink::none(),
-            first_empty: link_no_prev(first_empty),
-            last_empty: last_empty,
+        heap.push(NodeOption::Free(None));
+        FixedCapacityList {
+            heap: heap,
+            list: Sentry::Empty,
+            free: Some(0), 
         }
-    }
-
-    #[inline]
-    pub fn size(&self) -> usize {
-        self.size
-    }
-
-    #[inline]
-    pub fn capacity(&self) -> usize {
-        self.capacity
     }
 
     pub fn enqueue(&mut self, element: T) {
-        if self.size >= self.capacity {
-            panic!("No remaining capacity to enqueue");
-        }
-        let new_node = Box::new(Node::new(element));
-        match unsafe { self.last.resolve_mut() } {
-            None => {
-                self.first = Some(new_node);
-                self.last = Rawlink::from(&mut self.first);
+        let free_index = self.free.expect("No remaining capacity");
+        self.free = self.heap[free_index].expect_free();
+        match self.list {
+            Sentry::Empty => {
+                self.heap[free_index] = NodeOption::Occupied {
+                    next: None,
+                    prev: None,
+                    value: element,
+                };
+                self.list = Sentry::Filled {
+                    first: free_index,
+                    last: free_index,
+                }
             },
-            Some(node) => {
-                node.set_next(new_node);
-                self.last = Rawlink::from(&mut node.next);
+            Sentry::Filled { first, last } => {
+                match self.heap[last] {
+                    NodeOption::Occupied { ref mut next, .. } => *next = Some(free_index),
+                    _ => panic!["Node in list was free"],
+                };
+                self.heap[free_index] = NodeOption::Occupied {
+                    next: None,
+                    prev: Some(last),
+                    value: element,
+                };
+                self.list = Sentry::Filled {
+                    first: first,
+                    last: free_index,
+                }
             },
         }
-        self.size += 1;
     }
 
     pub fn dequeue(&mut self) -> Option<T> {
-        self.first.take().map(|mut first_node| {
-            self.size -= 1;
-            match first_node.next.take() {
-                Some(node) => self.first = link_no_prev(node),
-                None => self.last = Rawlink::none(),
+        match self.list {
+            Sentry::Empty => None,
+            Sentry::Filled { first, last } => {
+                // swap the node being removed for a Free node
+                let mut temp_node = NodeOption::Free(self.free);
+                mem::swap(&mut self.heap[first], &mut temp_node);
+
+                // that node is now the next free node
+                self.free = Some(first);
+
+                // we now process the occupied node we removed from the heap
+                match temp_node {
+                    NodeOption::Occupied { next, prev: None, value } => {
+                        self.list = match next {
+                            Some(next) => {
+                                match self.heap[next] {
+                                    NodeOption::Occupied { next: _, ref mut prev, .. } => {
+                                        *prev = None;
+                                        Sentry::Filled { first: next, last: last }
+                                    },
+                                    _ => panic!["Free node in list"],
+                                }
+                            }
+                            None => Sentry::Empty,
+                        };
+                        Some(value)
+                    },
+                    NodeOption::Occupied { .. } => panic!["removed node not at front of list"],
+                    NodeOption::Free(..) => panic!["Unoccupied node in list"],
+                }
             }
-            first_node.value.expect("Value should always be Some when being dequeued")
-        })
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::FixedSizePriorityBuffer;
+    use super::FixedCapacityList;
 
     #[test]
-    fn queue_is_fifo() {
-        let mut b = FixedSizePriorityBuffer::<i32>::new(3);
-        assert_eq!(b.capacity(), 3);
-        assert_eq!(b.size(), 0);
+    fn list_is_has_fifo_interface() {
+        let mut b = FixedCapacityList::<i32>::new(2);
         b.enqueue(1);
         b.enqueue(2);
-        b.enqueue(3);
-        assert_eq!(b.size(), 3);
         assert_eq!(b.dequeue(), Some(1));
         assert_eq!(b.dequeue(), Some(2));
-        assert_eq!(b.dequeue(), Some(3));
-        assert_eq!(b.size(), 0);
+        assert_eq!(b.dequeue(), None);
+    }
+
+    #[test]
+    fn list_can_add_up_to_its_capacity() {
+        let mut b = FixedCapacityList::<i32>::new(2);
+        b.enqueue(1);
+        b.enqueue(2);
     }
 
     #[test]
     #[should_panic]
-    fn queue_is_fixed_capacity() {
-        let mut b = FixedSizePriorityBuffer::<i32>::new(2);
+    fn list_wont_add_past_fixed_capacity() {
+        let mut b = FixedCapacityList::<i32>::new(2);
         b.enqueue(1);
         b.enqueue(2);
         b.enqueue(3);
