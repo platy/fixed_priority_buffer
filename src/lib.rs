@@ -100,7 +100,9 @@ impl<T> FixedCapacityList<T> {
 
                 // we now process the occupied node and fix the list
                 match temp_node {
+                    // in normal case
                     NodeOption::Occupied { next: Some(next), prev: None, value } => {
+                        // the next node becomes the new first node
                         self.list = match self.heap[next] {
                             NodeOption::Occupied { next: _, ref mut prev, .. } => {
                                 *prev = None;
@@ -110,7 +112,9 @@ impl<T> FixedCapacityList<T> {
                         };
                         Some(value)
                     },
+                    // when it was the only node
                     NodeOption::Occupied { next: None, prev: None, value } => {
+                        // the list becomes empty
                         self.list = Sentry::Empty;
                         Some(value)
                     },
